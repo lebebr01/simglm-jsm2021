@@ -1,0 +1,229 @@
+---
+title: "Tidy Simulation and Power Analyses"
+author: "Brandon LeBeau"
+output: 
+  revealjs::revealjs_presentation:
+    theme: simple
+    highlight: pygments
+    transition: fade
+    mathjax: null
+    slide_level: 1
+    includes:
+      in_header: custom.css
+    reveal_options:
+      slideNumber: true
+      conrols: false
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(simglm)
+```
+
+
+# `simglm` package for simulation and power analyses
+
++ Simulates a variety of regression models
+   - Continuous, binary, or count outcomes
+   - With or without random effects
+   - Longitudinal mixed models
++ Flexible model specification
+   - Missing data
+   - Correlated data
+   - Population vs Sample specific models
++ Replication built into package
++ Parallel processing using `future`
++ Current CRAN version: 0.8.8
+
+
+# Modular Approach
+
+- **Simulation**
+    + `simulate_*`: These functions perform a simulation operation
+    + `correlate_*`: These correlate simulation based elements.
+    + `generate_*`: These generate based on the simulation steps
+- **Power/Model**
+    + `model_fit()`: Fit a statistical model to simulated data
+    + `extract_coefficients()`: Extract model coefficients
+    + `replicate_simulation()`: Replicate simulation and/or model fitting
+    + `compute_statistics()`: Compute statistics to summarize replication
+    
+    
+# Simulation Example
+
+```{r }
+set.seed(321) 
+
+sim_arguments <- list(
+  formula = y ~ 1 + weight + age + sex,
+  fixed = list(weight = list(var_type = 'continuous', mean = 180, sd = 30),
+               age = list(var_type = 'ordinal', levels = 30:60),
+               sex = list(var_type = 'factor', levels = c('male', 'female'))),
+  error = list(variance = 25),
+  sample_size = 1000,
+  reg_weights = c(2, 0.3, -0.1, 0.5)
+)
+
+simulate_fixed(data = NULL, sim_arguments) %>%
+  simulate_error(sim_arguments) %>%
+  generate_response(sim_arguments) %>% 
+  head()
+```
+
+# Model Fitting
+
+```{r }
+simulate_fixed(data = NULL, sim_arguments) %>%
+  simulate_error(sim_arguments) %>%
+  generate_response(sim_arguments) %>% 
+  model_fit(sim_arguments) %>%
+  extract_coefficients()
+```
+
+# Power Analysis - simulation arguments
++ New Simulation arguments for power
+
+```{r}
+sim_arguments <- list(
+  formula = y ~ 1 + weight + age + sex,
+  sample_size = 50,
+  model_fit = list(formula = y ~ 1 + weight + age + sex,
+                   model_function = 'lm'),
+  replications = 1000,
+  power = list(
+    dist = 'qt',
+    alpha = .02,
+    opts = list(df = 49)
+  ),
+  extract_coefficients = TRUE
+)
+```
+
+
+```{r echo = FALSE}
+set.seed(321) 
+
+sim_arguments <- list(
+  formula = y ~ 1 + weight + age + sex,
+  fixed = list(weight = list(var_type = 'continuous', mean = 180, sd = 30),
+               age = list(var_type = 'ordinal', levels = 30:60),
+               sex = list(var_type = 'factor', levels = c('male', 'female'))),
+  error = list(variance = 25),
+  sample_size = 50,
+  reg_weights = c(2, 0.3, -0.1, 0.5),
+  model_fit = list(formula = y ~ 1 + weight + age + sex,
+                   model_function = 'lm'),
+  replications = 1000,
+  power = list(
+    dist = 'qt',
+    alpha = .02,
+    opts = list(df = 49)
+  ),
+  extract_coefficients = TRUE
+)
+```
+
+# Power Analysis - Replications
+
+```{r}
+library(future)
+plan(multisession)
+
+replicated_simulations <- replicate_simulation(sim_arguments)
+```
+
++ `replicate_simulation()` is basically:
+
+```{r eval = FALSE}
+simulate_fixed(data = NULL, sim_arguments) %>%
+  simulate_error(sim_arguments) %>%
+  generate_response(sim_arguments) %>% 
+  model_fit(sim_arguments) %>%
+  extract_coefficients()
+```
+
+
+# Power Analysis - Compute Statistics
+```{r}
+compute_statistics(replicated_simulations, sim_arguments,
+                   power = TRUE, 
+                   type_1_error = FALSE,
+                   precision = TRUE)
+```
+
+# Vary Simulation Arguments
++ New arguments for varying arguments.
+
+```{r}
+sim_arguments <- list(
+  formula = y ~ 1 + weight + age + sex,
+  vary_arguments = list(
+    sample_size = c(50, 100, 200, 1000)
+  )
+)
+```
+
+```{r echo = FALSE}
+set.seed(321) 
+
+sim_arguments <- list(
+  formula = y ~ 1 + weight + age + sex,
+  fixed = list(weight = list(var_type = 'continuous', mean = 180, sd = 30),
+               age = list(var_type = 'ordinal', levels = 30:60),
+               sex = list(var_type = 'factor', levels = c('male', 'female'))),
+  error = list(variance = 25),
+  reg_weights = c(2, 0.3, -0.1, 0.5),
+  model_fit = list(formula = y ~ 1 + weight + age + sex,
+                   model_function = 'lm'),
+  replications = 1000,
+  power = list(
+    dist = 'qt',
+    alpha = .02,
+    opts = list(df = 49)
+  ),
+  extract_coefficients = TRUE,
+  vary_arguments = list(
+    sample_size = c(50, 100, 200, 1000)
+  )
+)
+```
+
+# Power - Replications
+```{r}
+library(future)
+plan(multisession)
+
+replicated_simulations <- replicate_simulation(sim_arguments)
+```
+
+# Power - Compute Statistics
+```{r}
+power_est <- compute_statistics(replicated_simulations, sim_arguments,
+                   power = TRUE, 
+                   type_1_error = FALSE,
+                   precision = TRUE)
+
+head(power_est)
+```
+
+# Power Visualization
+```{r echo = FALSE}
+library(ggplot2)
+
+ggplot(power_est, aes(x = as.numeric(sample_size), y = power, color = term)) + 
+  geom_line(aes(group = term), size = 1.25) + 
+  geom_point(size = 4) + 
+  theme_bw(base_size = 18) + 
+  scale_x_continuous("Sample Size", 
+                     breaks = c(50, 100, 200, 1000)) + 
+  ylab("Empirical Power")
+```
+
+
+
+# More Details
++ Package website - https://simglm.brandonlebeau.org/
++ Github - https://github.com/lebebr01/simglm
++ Twitter - https://twitter.com/blebeau11
